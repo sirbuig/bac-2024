@@ -96,13 +96,13 @@ with open(scraped_data, "w", newline="") as csvfile:
 def main():
     metadata, initial_soup = get_initial_metadata(base_url)
 
-    print("Scraping page 1/13442...")
+    total_num_pages = 13442
+
+    print(f"Scraping page 1/{total_num_pages}...")
     data = extract_data(initial_soup)
     with open(scraped_data, "a", newline="") as csvfile:
         csvwriter = csv.writer(csvfile)
         csvwriter.writerows(data)
-
-    total_num_pages = 13442
 
     for page_number in range(2, total_num_pages + 1):
         print(f"Scraping page {page_number}/{total_num_pages}...")
