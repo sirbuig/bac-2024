@@ -2,34 +2,22 @@ import requests
 from bs4 import BeautifulSoup
 import csv
 import time
+import re
 
-base_url = "http://bacalaureat.edu.ro/Pages/TaraRezultMedie.aspx"
+base_url = "http://static.bacalaureat.edu.ro/2024/rapoarte/rezultate/index.html"
 session = requests.Session()
 headers = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.106 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"
 }
 
 
-def get_initial_metadata(url):
-    response = session.get(url, headers=headers, timeout=10)
-    soup = BeautifulSoup(response.content, "html.parser")
-
-    metadata = {
-        "__EVENTTARGET": "ctl00$ContentPlaceHolderBody$DropDownList2",
-        "__EVENTARGUMENT": "",
-        "__LASTFOCUS": "",
-        "__VIEWSTATE": soup.find("input", {"name": "__VIEWSTATE"})["value"],
-        "__VIEWSTATEGENERATOR": soup.find("input", {"name": "__VIEWSTATEGENERATOR"})[
-            "value"
-        ],
-        "__EVENTVALIDATION": soup.find("input", {"name": "__EVENTVALIDATION"})["value"],
-    }
-    return metadata, soup
-
-
-def get_page_data(url, metadata, page_number):
-    metadata["ctl00$ContentPlaceHolderBody$DropDownList2"] = str(page_number)
-    response = session.post(url, data=metadata, headers=headers, timeout=10)
+def get_page_data(page_number):
+    response = session.post(
+        f"http://static.bacalaureat.edu.ro/2024/rapoarte_sept/rezultate/dupa_medie/page_{page_number}.html",
+        data=None,
+        headers=headers,
+        timeout=10,
+    )
     soup = BeautifulSoup(response.content, "html.parser")
     return soup
 
@@ -40,29 +28,40 @@ def extract_data(soup):
     if main_table:
         table_rows = main_table.find_all("tr")[2:]
         for part_1, part_2 in zip(table_rows[::2], table_rows[1::2]):
+            # dynamic javascript
+            script_cells = part_1.find_all("script")[0].string
+            pattern = re.compile(r'\["([^"]+)\s*<br>"]\s*=\s*"([^"]+)"(?:<br>)?')
+            matches = re.findall(pattern, script_cells)
+
+            # cleaned data
+            candidate_data = [match[1].replace("<br>", "").strip() for match in matches]
+
+            # parse basic td
             cells_1 = part_1.find_all("td")
             cell_data_1 = [cell.get_text(strip=True) for cell in cells_1]
             cells_2 = part_2.find_all("td")
             cell_data_2 = [cell.get_text(strip=True) for cell in cells_2]
-            temp = [
-                cell_data_1[0],
-                cell_data_1[2],
-                cell_data_1[3],
-                cell_data_1[6],
-                cell_data_1[8],
-                cell_data_1[9],
-                cell_data_1[10],
-                cell_data_1[-5],
-                cell_data_2[4],
-                cell_data_2[5],
-                cell_data_2[6],
-                cell_data_1[-4],
-                cell_data_2[7],
-                cell_data_2[8],
-                cell_data_2[9],
-                cell_data_1[-2],
-                cell_data_1[-1],
-            ]
+
+            # print(cell_data_1)
+
+            temp = (
+                [cell_data_1[0]]
+                + [candidate_data[0]]
+                + cell_data_1[2:12]
+                + [
+                    cell_data_2[0],
+                    cell_data_2[1],
+                    cell_data_2[2],
+                    cell_data_2[3],
+                ]
+                + cell_data_1[12:15]
+                + cell_data_2[4:7]
+                + [cell_data_1[15]]
+                + cell_data_2[7:10]
+                + [cell_data_1[16]]
+                + candidate_data[1:3]
+            )
+
             results.append(temp)
     return results
 
@@ -70,20 +69,32 @@ def extract_data(soup):
 scraped_data = "scraped_data.csv"
 fields = [
     "Nr. crt.",
+    "Codul candidatului",
     "Unitatea de invatamant",
     "Judetul",
+    "Promotie anterioara",
+    "Forma invatamant",
     "Specializare",
+    "Romana-Competente",
     "Romana-Scris",
     "Romana-Contestatie",
     "Romana-Final",
+    "Limba materna-Denumire",
+    "Limba materna-Competente",
+    "Limba materna-Scris",
+    "Limba materna-Contestatie",
+    "Limba materna-Final",
+    "Limba moderna",
+    "Limba moderna-Nota",
     "DiscOblig-Denumire",
-    "DiscOblig-Scris",
+    "DiscOblig-Nota",
     "DiscOblig-Contestatie",
     "DiscOblig-Final",
     "DiscAlegere-Denumire",
-    "DiscAlegere-Scris",
+    "DiscAlegere-Nota",
     "DiscAlegere-Contestatie",
     "DiscAlegere-Final",
+    "Competente digitale",
     "Media",
     "Rezultatul Final",
 ]
@@ -94,9 +105,9 @@ with open(scraped_data, "w", newline="") as csvfile:
 
 
 def main():
-    metadata, initial_soup = get_initial_metadata(base_url)
+    initial_soup = get_page_data(1)
 
-    total_num_pages = 13442
+    total_num_pages = 3368
 
     print(f"Scraping page 1/{total_num_pages}...")
     data = extract_data(initial_soup)
@@ -110,24 +121,13 @@ def main():
         retries = 3
         while retries > 0:
             try:
-                soup = get_page_data(base_url, metadata, page_number)
-
-                viewstate = soup.find("input", {"name": "__VIEWSTATE"})
-                viewstate_gen = soup.find("input", {"name": "__VIEWSTATEGENERATOR"})
-                eventvalidation = soup.find("input", {"name": "__EVENTVALIDATION"})
-
-                if not (viewstate and viewstate_gen and eventvalidation):
-                    raise ValueError("Required metadata not found on page.")
+                soup = get_page_data(page_number)
 
                 page_data = extract_data(soup)
 
                 with open(scraped_data, "a", newline="") as csvfile:
                     csvwriter = csv.writer(csvfile)
                     csvwriter.writerows(page_data)
-
-                metadata["__VIEWSTATE"] = viewstate["value"]
-                metadata["__VIEWSTATEGENERATOR"] = viewstate_gen["value"]
-                metadata["__EVENTVALIDATION"] = eventvalidation["value"]
 
                 break
 
@@ -144,3 +144,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # soup = get_page_data(1)
+    # data = extract_data(soup)
